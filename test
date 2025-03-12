@@ -1,0 +1,49 @@
+import pandas as pd
+from concurrent.futures import ProcessPoolExecutor
+import os
+
+# File paths
+file_a = 'path/to/file_a.xlsx'
+file_b = 'path/to/file_b.xlsx'
+file_c = 'path/to/file_c.xlsx'
+output_file = 'path/to/output_file.xlsx'
+
+def read_excel(file_path, usecols):
+    return pd.read_excel(file_path, usecols=usecols)
+
+def process_chunk(chunk, df_b, df_c):
+    # Merge chunk with B and C
+    merged = pd.merge(chunk, df_b, on='Account Id - A', how='left')
+    merged = pd.merge(merged, df_c, on='Account Id - B', how='left')
+    
+    # Aggregate emails
+    merged['Account - A Email'] = merged.groupby('Account Id - A')['Account - A Email'].transform(lambda x: ', '.join(x.dropna().unique()))
+    merged['Account - B Email'] = merged.groupby('Account Id - B')['Account - B Email'].transform(lambda x: ', '.join(x.dropna().unique()))
+    
+    # Select required columns
+    return merged[['Account Id - A', 'Account Id - B', 'Account - A Email', 'Account - B Email']].drop_duplicates()
+
+if __name__ == '__main__':
+    # Read files B and C entirely (they are smaller)
+    df_b = read_excel(file_b, usecols=['Account Id - A', 'Account - A Email'])
+    df_c = read_excel(file_c, usecols=['Account Id - B', 'Account - B Email'])
+
+    # Process file A in chunks
+    chunk_size = 10000  # Adjust based on available memory
+    output_chunks = []
+
+    with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = []
+        for chunk in pd.read_excel(file_a, usecols=['Account Id - A', 'Account Id - B'], chunksize=chunk_size):
+            futures.append(executor.submit(process_chunk, chunk, df_b, df_c))
+        
+        for future in futures:
+            output_chunks.append(future.result())
+
+    # Combine all processed chunks
+    final_output = pd.concat(output_chunks, ignore_index=True)
+
+    # Write to Excel
+    final_output.to_excel(output_file, index=False)
+
+print(f"Output written to {output_file}")
