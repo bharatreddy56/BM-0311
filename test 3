@@ -19,10 +19,6 @@ def process_chunk(chunk_data, df_b, df_c):
     merged = pd.merge(chunk, df_b, on='Account Id - A', how='left')
     merged = pd.merge(merged, df_c, on='Account Id - B', how='left')
     
-    # Aggregate emails
-    merged['Account - A Email'] = merged.groupby('Account Id - A')['Account - A Email'].transform(lambda x: ', '.join(x.dropna().unique()))
-    merged['Account - B Email'] = merged.groupby('Account Id - B')['Account - B Email'].transform(lambda x: ', '.join(x.dropna().unique()))
-    
     # Select required columns
     return merged[['Account Id - A', 'Account Id - B', 'Account - A Email', 'Account - B Email']].drop_duplicates()
 
@@ -56,7 +52,15 @@ if __name__ == '__main__':
     # Combine all processed chunks
     final_output = pd.concat(output_chunks, ignore_index=True)
 
-    # Write to Excel
-    final_output.to_excel(output_file, index=False)
+    # Write to Excel with specific formatting
+    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+        final_output.to_excel(writer, index=False, sheet_name='Sheet1')
+        worksheet = writer.sheets['Sheet1']
+        
+        # Adjust column widths
+        worksheet.column_dimensions['A'].width = 15  # Account Id - A
+        worksheet.column_dimensions['B'].width = 15  # Account Id - B
+        worksheet.column_dimensions['C'].width = 30  # Account - A Email
+        worksheet.column_dimensions['D'].width = 30  # Account - B Email
 
-print(f"Output written to {output_file}")
+    print(f"Output written to {output_file}")
