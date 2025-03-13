@@ -1,1 +1,2 @@
-=IF(AND(A2<>"", B2<>""), IF(OR(ISNUMBER(SEARCH(SUBSTITUTE(A2,", ","|"),B2)), ISNUMBER(SEARCH(SUBSTITUTE(B2,", ","|"),A2))), "Match", ""), ""), "")
+=IF(OR(ISNUMBER(SEARCH(TRIM(TEXTSPLIT(B2, ",")), A2))), "Match", "")
+
