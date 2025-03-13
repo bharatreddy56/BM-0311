@@ -1,0 +1,1 @@
+=IF(OR(ISNUMBER(FIND(SUBSTITUTE(A2," ",""),SUBSTITUTE(B2," ",""))),ISNUMBER(FIND(SUBSTITUTE(B2," ",""),SUBSTITUTE(A2," ","")))),"match","no match")
