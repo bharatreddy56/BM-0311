@@ -1,2 +1,2 @@
-=IF(OR(ISNUMBER(SEARCH(TRIM(TEXTSPLIT(B2, ",")), A2))), "Match", "")
+=IF(SUMPRODUCT(--ISNUMBER(SEARCH("," & TRIM(TEXTSPLIT(B2, ",")) & ",", "," & A2 & ",")))>0, "Match", "")
 
