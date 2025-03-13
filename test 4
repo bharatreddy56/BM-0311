@@ -1,2 +1,27 @@
-=IF(SUMPRODUCT(--ISNUMBER(SEARCH("," & TRIM(TEXTSPLIT(B2, ",")) & ",", "," & A2 & ",")))>0, "Match", "")
+import pandas as pd
+
+# Read the Excel file
+df = pd.read_excel('your_file.xlsx')
+
+def compare_emails(row):
+    email_a = row['C']  # Assuming 'C' is the column name for Account - A Email
+    email_b = row['J']  # Assuming 'J' is the column name for Account - B Email
+    
+    if pd.isna(email_a) or pd.isna(email_b):
+        return ''
+    
+    emails_a = set(email.strip() for email in str(email_a).split(','))
+    emails_b = set(email.strip() for email in str(email_b).split(','))
+    
+    if emails_a.intersection(emails_b):
+        return 'Match'
+    return ''
+
+# Apply the comparison function
+df['result'] = df.apply(compare_emails, axis=1)
+
+# Write the result back to Excel
+df.to_excel('output_file.xlsx', index=False)
+
+print("Comparison complete. Results written to 'output_file.xlsx'")
 
