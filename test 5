@@ -1,0 +1,11 @@
+import pandas as pd
+
+# Read the two sheets from the Excel file
+sheet1 = pd.read_excel("input.xlsx", sheet_name="Sheet-1")
+sheet2 = pd.read_excel("input.xlsx", sheet_name="Sheet-2")
+
+# Filter sheet2 data based on AccId present in sheet1
+filtered_data = sheet2[sheet2['C - AccId'].isin(sheet1['C - AccId'])]
+
+# Save the filtered data to a new Excel file
+filtered_data.to_excel("output.xlsx", index=False)
