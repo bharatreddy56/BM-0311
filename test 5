@@ -1,11 +1,36 @@
 import pandas as pd
 
-# Read the two sheets from the Excel file
-sheet1 = pd.read_excel("input.xlsx", sheet_name="Sheet-1")
-sheet2 = pd.read_excel("input.xlsx", sheet_name="Sheet-2")
+# Specify the path to your input Excel file
+input_file = "input.xlsx"
 
-# Filter sheet2 data based on AccId present in sheet1
-filtered_data = sheet2[sheet2['C - AccId'].isin(sheet1['C - AccId'])]
+try:
+    # Read Sheet-1 and Sheet-2 from the Excel file
+    sheet1 = pd.read_excel(input_file, sheet_name="Sheet-1")
+    sheet2 = pd.read_excel(input_file, sheet_name="Sheet-2")
 
-# Save the filtered data to a new Excel file
-filtered_data.to_excel("output.xlsx", index=False)
+    # Debugging: Print the first few rows to verify data loading
+    print("Sheet-1 Data:")
+    print(sheet1.head())
+    print("Sheet-2 Data:")
+    print(sheet2.head())
+
+    # Ensure column names are correct
+    if 'C - AccId' not in sheet1.columns or 'C - AccId' not in sheet2.columns:
+        raise ValueError("Column 'C - AccId' not found in one of the sheets.")
+
+    # Filter sheet2 data based on AccId present in sheet1
+    filtered_data = sheet2[sheet2['C - AccId'].isin(sheet1['C - AccId'])]
+
+    # Save the filtered data to a new Excel file
+    output_file = "output.xlsx"
+    filtered_data.to_excel(output_file, index=False)
+
+    print(f"Filtered data successfully saved to {output_file}")
+
+except FileNotFoundError:
+    print(f"Error: The file {input_file} was not found.")
+except ValueError as ve:
+    print(f"ValueError: {ve}")
+except Exception as e:
+    print(f"An unexpected error occurred: {e}")
+
