@@ -16,3 +16,4 @@
     
     # Assign the matched values to output_df using the original index
     output_df.loc[merged_mco[matched_mco_mask].index, 'Match'] = merged_mco.loc[merged_mco[matched_mco_mask].index, 'Id_y'].values
+pip install pandas rapidfuzz python-Levenshtein
