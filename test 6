@@ -1,79 +1,81 @@
-# Required packages:
-# pip install pandas numpy fuzzywuzzy python-Levenshtein openpyxl
-
 import pandas as pd
 from fuzzywuzzy import fuzz
 import numpy as np
 
-def match_sheets(file_path):
+def optimized_match_sheets(file_path):
     """
-    Match data between Sheet 1 and Sheet 2 based on specified criteria.
-    Sheet 2 is considered the main reference sheet.
+    Match data between Sheet 1 and Sheet 2 using optimized methods for speed.
     """
     # Read both sheets
     df_sheet1 = pd.read_excel(file_path, sheet_name='Sheet1')
     df_sheet2 = pd.read_excel(file_path, sheet_name='Sheet2')
-    
+
+    # Convert columns to appropriate types and lowercase for matching
+    for col in ['Account_Hosp_Id_r', 'Account_Mco__Id_r']:
+        if col in df_sheet1.columns:
+            df_sheet1[col] = df_sheet1[col].astype(str).str.lower()
+    for col in ['Account_Hosp_Id', 'Account_Mco__Id']:
+        if col in df_sheet2.columns:
+            df_sheet2[col] = df_sheet2[col].astype(str).str.lower()
+
     # Create a copy of Sheet 1 for output
     output_df = df_sheet1.copy()
     output_df['Match'] = np.nan
-    
-    # For each row in Sheet 1, find matching rows in Sheet 2
-    for idx1, row1 in df_sheet1.iterrows():
-        # 1. Check Account_Hosp_Id_r (Sheet1) vs Account_Hosp_Id (Sheet2)
-        if pd.notna(row1['Account_Hosp_Id_r']):
-            matches = df_sheet2[df_sheet2['Account_Hosp_Id'] == row1['Account_Hosp_Id_r']]
-            if not matches.empty:
-                output_df.loc[idx1, 'Match'] = matches['Id'].iloc[0]
-                continue
-        
-        # 2. Check Account_Mco__Id_r (Sheet1) vs Account_Mco__Id (Sheet2)
-        if pd.notna(row1['Account_Mco__Id_r']):
-            matches = df_sheet2[df_sheet2['Account_Mco__Id'] == row1['Account_Mco__Id_r']]
-            if not matches.empty:
-                output_df.loc[idx1, 'Match'] = matches['Id'].iloc[0]
-                continue
-        
-        # 3. Check DomainEmail (Sheet1) vs Website (Sheet2) with 90% similarity
-        if pd.notna(row1['DomainEmail']):
-            for _, row2 in df_sheet2.iterrows():
-                if pd.notna(row2['Website']):
-                    similarity = fuzz.ratio(str(row1['DomainEmail']).lower(), str(row2['Website']).lower())
-                    if similarity >= 90:
-                        output_df.loc[idx1, 'Match'] = row2['Website']
-                        break
-            if pd.notna(output_df.loc[idx1, 'Match']):
-                continue
-        
-        # 4. Check Account_Name (Sheet1) vs Name (Sheet2) with 90% similarity
-        if pd.notna(row1['Account_Name']):
-            for _, row2 in df_sheet2.iterrows():
-                if pd.notna(row2['Name']):
-                    similarity = fuzz.ratio(str(row1['Account_Name']).lower(), str(row2['Name']).lower())
-                    if similarity >= 90:
-                        output_df.loc[idx1, 'Match'] = row2['Name']
-                        break
-            if pd.notna(output_df.loc[idx1, 'Match']):
-                continue
-        
-        # 5. Check Company (Sheet1) vs Name (Sheet2) with 90% similarity
-        if pd.notna(row1['Company']):
-            for _, row2 in df_sheet2.iterrows():
-                if pd.notna(row2['Name']):
-                    similarity = fuzz.ratio(str(row1['Company']).lower(), str(row2['Name']).lower())
-                    if similarity >= 90:
-                        output_df.loc[idx1, 'Match'] = row2['Name']
-                        break
-    
+    output_df['Match'] = output_df['Match'].astype(object)
+
+    # 1. Check Account_Hosp_Id_r vs Account_Hosp_Id
+    merged_hosp = pd.merge(df_sheet1, df_sheet2, left_on='Account_Hosp_Id_r', right_on='Account_Hosp_Id', how='left')
+    output_df.loc[merged_hosp['Account_Hosp_Id'].notna(), 'Match'] = merged_hosp.loc[merged_hosp['Account_Hosp_Id'].notna(), 'Id_y'].values
+
+    # 2. Check Account_Mco__Id_r vs Account_Mco__Id for unmatched rows
+    unmatched_idx = output_df['Match'].isna()
+    merged_mco = pd.merge(df_sheet1[unmatched_idx], df_sheet2, left_on='Account_Mco__Id_r', right_on='Account_Mco__Id', how='left')
+    output_df.loc[merged_mco['Account_Mco__Id'].notna(), 'Match'] = merged_mco.loc[merged_mco['Account_Mco__Id'].notna(), 'Id_y'].values
+
+    # Function for fuzzy matching
+    def fuzzy_match(domain_email, website):
+        if pd.isna(domain_email) or pd.isna(website):
+            return np.nan
+        similarity = fuzz.ratio(str(domain_email).lower(), str(website).lower())
+        if similarity >= 90:
+            return website
+        return np.nan
+
+    # 3. Check DomainEmail vs Website for unmatched rows with fuzzy matching
+    unmatched_idx = output_df['Match'].isna()
+    if unmatched_idx.any():
+        output_df.loc[unmatched_idx, 'Match'] = df_sheet1.loc[unmatched_idx].apply(lambda row: next((
+            fuzzy_match(row['DomainEmail'], website) for website in df_sheet2['Website'] if fuzzy_match(row['DomainEmail'], website)), np.nan), axis=1)
+
+    # 4. Check Account_Name vs Name for unmatched rows with fuzzy matching
+    def fuzzy_match_name(account_name, name):
+        if pd.isna(account_name) or pd.isna(name):
+            return np.nan
+        similarity = fuzz.ratio(str(account_name).lower(), str(name).lower())
+        if similarity >= 90:
+            return name
+        return np.nan
+
+    unmatched_idx = output_df['Match'].isna()
+    if unmatched_idx.any():
+        output_df.loc[unmatched_idx, 'Match'] = df_sheet1.loc[unmatched_idx].apply(lambda row: next((
+            fuzzy_match_name(row['Account_Name'], name) for name in df_sheet2['Name'] if fuzzy_match_name(row['Account_Name'], name)), np.nan), axis=1)
+
+    # 5. Check Company vs Name for unmatched rows with fuzzy matching
+    unmatched_idx = output_df['Match'].isna()
+    if unmatched_idx.any():
+        output_df.loc[unmatched_idx, 'Match'] = df_sheet1.loc[unmatched_idx].apply(lambda row: next((
+            fuzzy_match_name(row['Company'], name) for name in df_sheet2['Name'] if fuzzy_match_name(row['Company'], name)), np.nan), axis=1)
+
     return output_df
 
 def main():
     # File path (update this with your actual file path)
-    file_path = 'your_excel_file.xlsx'
-    
+    file_path = r'C:\bm_text.xlsx'
+
     # Match the sheets
-    result_df = match_sheets(file_path)
-    
+    result_df = optimized_match_sheets(file_path)
+
     # Write the output to a new Excel file
     output_file = 'matching_output.xlsx'
     result_df.to_excel(output_file, index=False)
