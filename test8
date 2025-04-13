@@ -1,97 +1,63 @@
 import pandas as pd
-from rapidfuzz import process, fuzz
-import numpy as np
-import multiprocessing
-from functools import partial
+from fuzzywuzzy import fuzz
 
-def fuzzy_match_wrapper(row1, df2, col1, col2):
-    """Helper function for parallel fuzzy matching"""
-    if pd.isna(row1[col1]):
-        return np.nan
-    
-    match, score, _ = process.extractOne(
-        str(row1[col1]).lower(),
-        df2[col2].dropna().astype(str).str.lower(),
-        scorer=fuzz.ratio,
-        score_cutoff=90
-    )
-    return match if score >= 90 else np.nan
+# Read both Excel files
+sheet1 = pd.read_excel('sheet1.xlsx')
+sheet2 = pd.read_excel('sheet2.xlsx')
 
-def optimized_match_sheets(file1, file2):
-    """Optimized matching for separate Excel files"""
-    # Read data with dtype specification
-    dtype_spec = {
-        'Account_Hosp_Id_r': 'string',
-        'Account_Mco__Id_r': 'string',
-        'Account_Hosp_Id': 'string',
-        'Account_Mco__Id': 'string'
-    }
-    
-    df1 = pd.read_excel(file1, dtype=dtype_spec)
-    df2 = pd.read_excel(file2, dtype=dtype_spec)
+# Convert relevant columns to string type and clean data
+for df in [sheet1, sheet2]:
+    df['Account_Hosp_Id_r'] = df['Account_Hosp_Id_r'].astype(str)
+    df['Account_Mco__Id_r'] = df['Account_Mco__Id_r'].astype(str)
+    df['DomainEmail'] = df['DomainEmail'].str.lower().str.strip()
 
-    # Standardize text columns
-    text_cols = ['DomainEmail', 'Account_Name', 'Company', 'Website', 'Name']
-    df1[text_cols] = df1[text_cols].apply(lambda x: x.astype(str).str.lower())
-    df2[text_cols] = df2[text_cols].apply(lambda x: x.astype(str).str.lower())
+sheet2['Account_Hosp_Id'] = sheet2['Account_Hosp_Id'].astype(str)
+sheet2['Account_Mco__Id'] = sheet2['Account_Mco__Id'].astype(str)
+sheet2['Website'] = sheet2['Website'].str.lower().str.strip()
+sheet2['Name'] = sheet2['Name'].str.lower().str.strip()
 
-    # Initialize output
-    output = df1.copy()
-    output['Match'] = np.nan
+# Initialize Match column
+sheet1['Match'] = None
 
-    # 1. First merge: Account_Hosp_Id_r
-    merge1 = pd.merge(
-        df1[['Account_Hosp_Id_r']],
-        df2[['Account_Hosp_Id', 'Id']],
-        left_on='Account_Hosp_Id_r',
-        right_on='Account_Hosp_Id',
-        how='left'
-    )
-    output['Match'] = merge1['Id']
-
-    # 2. Second merge: Account_Mco__Id_r (for unmatched rows)
-    unmatched = output['Match'].isna()
-    merge2 = pd.merge(
-        df1.loc[unmatched, ['Account_Mco__Id_r']],
-        df2[['Account_Mco__Id', 'Id']],
-        left_on='Account_Mco__Id_r',
-        right_on='Account_Mco__Id',
-        how='left'
-    )
-    output.loc[unmatched, 'Match'] = merge2['Id']
-
-    # 3. Parallel fuzzy matching for remaining columns
-    num_cores = multiprocessing.cpu_count()
-    for col_pair in [('DomainEmail', 'Website'),
-                    ('Account_Name', 'Name'),
-                    ('Company', 'Name')]:
-        
-        unmatched = output['Match'].isna()
-        if not unmatched.any():
+def get_best_match(row, sheet2, column1, column2, threshold=90):
+    matches = []
+    for _, s2_row in sheet2.iterrows():
+        if pd.isna(s2_row[column1]) or pd.isna(row[column2]):
             continue
+        if fuzz.ratio(str(s2_row[column1]).lower(), str(row[column2]).lower()) >= threshold:
+            matches.append((s2_row['Id'], f"name:{s2_row['Name']}"))
+    return matches[0][0] if matches else None
 
-        with multiprocessing.Pool(num_cores) as pool:
-            matches = pool.starmap(
-                fuzzy_match_wrapper,
-                [(row, df2, col_pair[0], col_pair[1]) 
-                 for _, row in df1.loc[unmatched].iterrows()]
-            )
+# Matching logic
+for idx, row in sheet1.iterrows():
+    # Check Account_Hosp_Id first
+    hosp_matches = sheet2[sheet2['Account_Hosp_Id'] == row['Account_Hosp_Id_r']]
+    if not hosp_matches.empty:
+        sheet1.at[idx, 'Match'] = hosp_matches.iloc[0]['Id']
+        continue
         
-        output.loc[unmatched, 'Match'] = matches
+    # Check Account_Mco__Id
+    mco_matches = sheet2[sheet2['Account_Mco__Id'] == row['Account_Mco__Id_r']]
+    if not mco_matches.empty:
+        sheet1.at[idx, 'Match'] = mco_matches.iloc[0]['Id']
+        continue
+        
+    # Check Website vs DomainEmail
+    website_matches = sheet2[sheet2['Website'] == row['DomainEmail']]
+    if not website_matches.empty:
+        sheet1.at[idx, 'Match'] = website_matches.iloc[0]['Id']
+        continue
+        
+    # Fuzzy match Name vs Account_Name
+    name_match = get_best_match(row, sheet2, 'Name', 'Account_Name')
+    if name_match:
+        sheet1.at[idx, 'Match'] = name_match
+        continue
+        
+    # Fuzzy match Name vs Company
+    company_match = get_best_match(row, sheet2, 'Name', 'Company')
+    if company_match:
+        sheet1.at[idx, 'Match'] = company_match
 
-    return output
-
-def main():
-    # File paths (update with your actual paths)
-    sheet1_path = r'C:\path\to\sheet1.xlsx'
-    sheet2_path = r'C:\path\to\sheet2.xlsx'
-    
-    # Run matching
-    result = optimized_match_sheets(sheet1_path, sheet2_path)
-    
-    # Save output
-    result.to_excel('matched_output.xlsx', index=False)
-    print("Matching completed. Output saved to matched_output.xlsx")
-
-if __name__ == "__main__":
-    main()
+# Save output
+sheet1.to_excel('matched_output.xlsx', index=False)
