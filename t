@@ -1,3 +1,3 @@
-Id	Name	Website	Website_2	Account_Hosp_Id	Account_Mco__Id
+output_df.loc[merged_hosp['Account_Hosp_Id'].notna(), 'Match'] = merged_hosp.loc[merged_hosp['Account_Hosp_Id'].notna(), 'Id_y'].reindex(output_df.index[merged_hosp['Account_Hosp_Id'].notna()]).values
 
-Id	Company	Email	DomainEmail	Account_Name	Account_Hosp_Id_r	Account_Mco__Id_r	Match
+output_df.loc[merged_mco['Account_Mco__Id'].notna(), 'Match'] = merged_mco.loc[merged_mco['Account_Mco__Id'].notna(), 'Id_y'].reindex(output_df.index[merged_mco['Account_Mco__Id'].notna()]).values
