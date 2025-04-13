@@ -1,0 +1,97 @@
+import pandas as pd
+from rapidfuzz import process, fuzz
+import numpy as np
+import multiprocessing
+from functools import partial
+
+def fuzzy_match_wrapper(row1, df2, col1, col2):
+    """Helper function for parallel fuzzy matching"""
+    if pd.isna(row1[col1]):
+        return np.nan
+    
+    match, score, _ = process.extractOne(
+        str(row1[col1]).lower(),
+        df2[col2].dropna().astype(str).str.lower(),
+        scorer=fuzz.ratio,
+        score_cutoff=90
+    )
+    return match if score >= 90 else np.nan
+
+def optimized_match_sheets(file1, file2):
+    """Optimized matching for separate Excel files"""
+    # Read data with dtype specification
+    dtype_spec = {
+        'Account_Hosp_Id_r': 'string',
+        'Account_Mco__Id_r': 'string',
+        'Account_Hosp_Id': 'string',
+        'Account_Mco__Id': 'string'
+    }
+    
+    df1 = pd.read_excel(file1, dtype=dtype_spec)
+    df2 = pd.read_excel(file2, dtype=dtype_spec)
+
+    # Standardize text columns
+    text_cols = ['DomainEmail', 'Account_Name', 'Company', 'Website', 'Name']
+    df1[text_cols] = df1[text_cols].apply(lambda x: x.astype(str).str.lower())
+    df2[text_cols] = df2[text_cols].apply(lambda x: x.astype(str).str.lower())
+
+    # Initialize output
+    output = df1.copy()
+    output['Match'] = np.nan
+
+    # 1. First merge: Account_Hosp_Id_r
+    merge1 = pd.merge(
+        df1[['Account_Hosp_Id_r']],
+        df2[['Account_Hosp_Id', 'Id']],
+        left_on='Account_Hosp_Id_r',
+        right_on='Account_Hosp_Id',
+        how='left'
+    )
+    output['Match'] = merge1['Id']
+
+    # 2. Second merge: Account_Mco__Id_r (for unmatched rows)
+    unmatched = output['Match'].isna()
+    merge2 = pd.merge(
+        df1.loc[unmatched, ['Account_Mco__Id_r']],
+        df2[['Account_Mco__Id', 'Id']],
+        left_on='Account_Mco__Id_r',
+        right_on='Account_Mco__Id',
+        how='left'
+    )
+    output.loc[unmatched, 'Match'] = merge2['Id']
+
+    # 3. Parallel fuzzy matching for remaining columns
+    num_cores = multiprocessing.cpu_count()
+    for col_pair in [('DomainEmail', 'Website'),
+                    ('Account_Name', 'Name'),
+                    ('Company', 'Name')]:
+        
+        unmatched = output['Match'].isna()
+        if not unmatched.any():
+            continue
+
+        with multiprocessing.Pool(num_cores) as pool:
+            matches = pool.starmap(
+                fuzzy_match_wrapper,
+                [(row, df2, col_pair[0], col_pair[1]) 
+                 for _, row in df1.loc[unmatched].iterrows()]
+            )
+        
+        output.loc[unmatched, 'Match'] = matches
+
+    return output
+
+def main():
+    # File paths (update with your actual paths)
+    sheet1_path = r'C:\path\to\sheet1.xlsx'
+    sheet2_path = r'C:\path\to\sheet2.xlsx'
+    
+    # Run matching
+    result = optimized_match_sheets(sheet1_path, sheet2_path)
+    
+    # Save output
+    result.to_excel('matched_output.xlsx', index=False)
+    print("Matching completed. Output saved to matched_output.xlsx")
+
+if __name__ == "__main__":
+    main()
