@@ -1,96 +1,112 @@
-# pip install pandas rapidfuzz python-Levenshtein
 import pandas as pd
-from rapidfuzz import process, fuzz
-import numpy as np
+from fuzzywuzzy import fuzz
+import os
 
-def optimize_matching(file_path):
-    # Read data
-    df1 = pd.read_excel(file_path, sheet_name='Sheet1')
-    df2 = pd.read_excel(file_path, sheet_name='Sheet2')
+# File paths - UPDATE THESE
+sheet1_path = r'C:\your\path\to\sheet1.xlsx'
+sheet2_path = r'C:\your\path\to\sheet2.xlsx'
+output_path = r'C:\your\output\path\matched_output.xlsx'
 
-    # Preprocess columns
-    for df in [df1, df2]:
-        df['Account_Hosp_Id'] = df.get('Account_Hosp_Id', df.get('Account_Hosp_Id_r', '')).astype(str).str.lower()
-        df['Account_Mco__Id'] = df.get('Account_Mco__Id', df.get('Account_Mco__Id_r', '')).astype(str).str.lower()
+def validate_columns(df, required_cols, sheet_name):
+    """Validate required columns exist in DataFrame"""
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns in {sheet_name}: {', '.join(missing)}")
 
-    # Initialize output
-    output = df1.copy()
-    output['Match'] = np.nan
-    output['Match'] = output['Match'].astype(object)
-
-    # 1. Account_Hosp_Id matching (Exact)
-    hosp_mask = df1['Account_Hosp_Id_r'].notna()
-    hosp_matches = df1[hosp_mask].merge(
-        df2, left_on='Account_Hosp_Id_r', right_on='Account_Hosp_Id', how='left'
-    )
-    output.loc[hosp_mask, 'Match'] = hosp_matches['Id_y'].values
-
-    # 2. Account_Mco__Id matching (Exact)
-    mco_mask = output['Match'].isna() & df1['Account_Mco__Id_r'].notna()
-    mco_matches = df1[mco_mask].merge(
-        df2, left_on='Account_Mco__Id_r', right_on='Account_Mco__Id', how='left'
-    )
-    output.loc[mco_mask, 'Match'] = mco_matches['Id_y'].values
-
-    # 3. DomainEmail vs Website (Fuzzy 90%+)
-    def bulk_fuzzy_match(queries, choices, threshold=90):
-        return [
-            (x[0] if x and x[1] >= threshold else None)
-            for x in process.extract(queries, choices, scorer=fuzz.QRatio, limit=1)
-        ]
-
-    # Domain blocking strategy
-    domain_mask = output['Match'].isna() & df1['DomainEmail'].notna()
-    df1_domains = df1.loc[domain_mask, 'DomainEmail'].str.extract(r'@(.*)\.')[0].str.lower()
-    df2_websites = df2['Website'].str.extract(r'(?:www\.)?([^.]*)\.')[0].str.lower()
+# Read and validate sheets
+try:
+    sheet1 = pd.read_excel(sheet1_path)
+    sheet2 = pd.read_excel(sheet2_path)
     
-    # Vectorized fuzzy matching with blocking
-    unique_domains = df1_domains.unique()
-    domain_map = {}
-    for domain in unique_domains:
-        if pd.notna(domain):
-            domain_map[domain] = df2[df2_websites == domain]['Website'].tolist()
+    # Validate Sheet1 columns
+    validate_columns(sheet1, 
+                   ['Id', 'Company', 'Email', 'DomainEmail', 
+                    'Account_Name', 'Account_Hosp_Id_r', 'Account_Mco__Id_r'], 
+                   'Sheet1')
     
-    results = []
-    for domain in df1_domains:
-        matches = domain_map.get(domain, [])
-        results.append(bulk_fuzzy_match(domain, matches)[0] if matches else None)
-    
-    output.loc[domain_mask, 'Match'] = results
+    # Validate Sheet2 columns
+    validate_columns(sheet2, 
+                   ['Id', 'Name', 'Website', 'Website_2', 
+                    'Account_Hosp_Id', 'Account_Mco__Id'], 
+                   'Sheet2')
 
-    # 4. Name matching (Fuzzy 90%+)
-    name_mask = output['Match'].isna() & df1['Account_Name'].notna()
-    name_matches = process.cdist(
-        df1.loc[name_mask, 'Account_Name'].str.lower(),
-        df2['Name'].str.lower(),
-        scorer=fuzz.QRatio,
-        dtype=np.uint8
-    )
-    output.loc[name_mask, 'Match'] = [
-        df2.loc[np.argmax(scores), 'Name'] if np.max(scores) >= 90 else None
-        for scores in name_matches
-    ]
+except Exception as e:
+    print(f"Error reading files: {str(e)}")
+    exit()
 
-    # 5. Company matching (Fuzzy 90%+)
-    comp_mask = output['Match'].isna() & df1['Company'].notna()
-    comp_matches = process.cdist(
-        df1.loc[comp_mask, 'Company'].str.lower(),
-        df2['Name'].str.lower(),
-        scorer=fuzz.QRatio,
-        dtype=np.uint8
-    )
-    output.loc[comp_mask, 'Match'] = [
-        df2.loc[np.argmax(scores), 'Name'] if np.max(scores) >= 90 else None
-        for scores in comp_matches
-    ]
+# Convert columns to string type safely
+def safe_convert(df, col, default=''):
+    return df[col].astype(str).fillna(default) if col in df.columns else pd.Series(default)
 
-    return output
+# Process Sheet1
+sheet1['Account_Hosp_Id_r'] = safe_convert(sheet1, 'Account_Hosp_Id_r')
+sheet1['Account_Mco__Id_r'] = safe_convert(sheet1, 'Account_Mco__Id_r')
+sheet1['DomainEmail'] = safe_convert(sheet1, 'DomainEmail').str.lower().str.strip()
 
-def main():
-    file_path = r'C:\bm_text.xlsx'  # Update with your path
-    result = optimize_matching(file_path)
-    result.to_excel('optimized_matches.xlsx', index=False)
-    print("Matching complete. Output saved to optimized_matches.xlsx")
+# Process Sheet2
+sheet2['Account_Hosp_Id'] = safe_convert(sheet2, 'Account_Hosp_Id')
+sheet2['Account_Mco__Id'] = safe_convert(sheet2, 'Account_Mco__Id')
+sheet2['Website'] = safe_convert(sheet2, 'Website').str.lower().str.strip()
+sheet2['Name'] = safe_convert(sheet2, 'Name').str.lower().str.strip()
 
-if __name__ == "__main__":
-    main()
+# Initialize Match column
+sheet1['Match'] = None
+
+def get_best_match(row, sheet2, column1, column2, threshold=90):
+    """Fuzzy matching with error handling"""
+    matches = []
+    try:
+        for _, s2_row in sheet2.iterrows():
+            if pd.isna(s2_row[column1]) or pd.isna(row[column2]):
+                continue
+            if fuzz.ratio(str(s2_row[column1]).lower(), str(row[column2]).lower()) >= threshold:
+                matches.append((s2_row['Id'], f"name:{s2_row['Name']}"))
+        return matches[0][0] if matches else None
+    except Exception as e:
+        print(f"Error in matching: {str(e)}")
+        return None
+
+# Main matching logic
+try:
+    for idx, row in sheet1.iterrows():
+        # Check Account_Hosp_Id first
+        if not pd.isna(row['Account_Hosp_Id_r']):
+            hosp_matches = sheet2[sheet2['Account_Hosp_Id'] == row['Account_Hosp_Id_r']]
+            if not hosp_matches.empty:
+                sheet1.at[idx, 'Match'] = hosp_matches.iloc[0]['Id']
+                continue
+                
+        # Check Account_Mco__Id
+        if not pd.isna(row['Account_Mco__Id_r']):
+            mco_matches = sheet2[sheet2['Account_Mco__Id'] == row['Account_Mco__Id_r']]
+            if not mco_matches.empty:
+                sheet1.at[idx, 'Match'] = mco_matches.iloc[0]['Id']
+                continue
+                
+        # Check Website vs DomainEmail
+        if not pd.isna(row['DomainEmail']):
+            website_matches = sheet2[sheet2['Website'] == row['DomainEmail']]
+            if not website_matches.empty:
+                sheet1.at[idx, 'Match'] = website_matches.iloc[0]['Id']
+                continue
+                
+        # Fuzzy match Name vs Account_Name
+        if 'Account_Name' in sheet1.columns:
+            name_match = get_best_match(row, sheet2, 'Name', 'Account_Name')
+            if name_match:
+                sheet1.at[idx, 'Match'] = name_match
+                continue
+                
+        # Fuzzy match Name vs Company
+        company_match = get_best_match(row, sheet2, 'Name', 'Company')
+        if company_match:
+            sheet1.at[idx, 'Match'] = company_match
+
+except Exception as e:
+    print(f"Error during matching process: {str(e)}")
+
+# Save output
+os.makedirs(os.path.dirname(output_path), exist_ok=True)
+sheet1.to_excel(output_path, index=False)
+print(f"Processing complete. Output saved to: {output_path}")
+
