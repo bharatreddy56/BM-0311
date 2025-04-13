@@ -1,0 +1,83 @@
+# Required packages:
+# pip install pandas numpy fuzzywuzzy python-Levenshtein openpyxl
+
+import pandas as pd
+from fuzzywuzzy import fuzz
+import numpy as np
+
+def match_sheets(file_path):
+    """
+    Match data between Sheet 1 and Sheet 2 based on specified criteria.
+    Sheet 2 is considered the main reference sheet.
+    """
+    # Read both sheets
+    df_sheet1 = pd.read_excel(file_path, sheet_name='Sheet1')
+    df_sheet2 = pd.read_excel(file_path, sheet_name='Sheet2')
+    
+    # Create a copy of Sheet 1 for output
+    output_df = df_sheet1.copy()
+    output_df['Match'] = np.nan
+    
+    # For each row in Sheet 1, find matching rows in Sheet 2
+    for idx1, row1 in df_sheet1.iterrows():
+        # 1. Check Account_Hosp_Id_r (Sheet1) vs Account_Hosp_Id (Sheet2)
+        if pd.notna(row1['Account_Hosp_Id_r']):
+            matches = df_sheet2[df_sheet2['Account_Hosp_Id'] == row1['Account_Hosp_Id_r']]
+            if not matches.empty:
+                output_df.loc[idx1, 'Match'] = matches['Id'].iloc[0]
+                continue
+        
+        # 2. Check Account_Mco__Id_r (Sheet1) vs Account_Mco__Id (Sheet2)
+        if pd.notna(row1['Account_Mco__Id_r']):
+            matches = df_sheet2[df_sheet2['Account_Mco__Id'] == row1['Account_Mco__Id_r']]
+            if not matches.empty:
+                output_df.loc[idx1, 'Match'] = matches['Id'].iloc[0]
+                continue
+        
+        # 3. Check DomainEmail (Sheet1) vs Website (Sheet2) with 90% similarity
+        if pd.notna(row1['DomainEmail']):
+            for _, row2 in df_sheet2.iterrows():
+                if pd.notna(row2['Website']):
+                    similarity = fuzz.ratio(str(row1['DomainEmail']).lower(), str(row2['Website']).lower())
+                    if similarity >= 90:
+                        output_df.loc[idx1, 'Match'] = row2['Website']
+                        break
+            if pd.notna(output_df.loc[idx1, 'Match']):
+                continue
+        
+        # 4. Check Account_Name (Sheet1) vs Name (Sheet2) with 90% similarity
+        if pd.notna(row1['Account_Name']):
+            for _, row2 in df_sheet2.iterrows():
+                if pd.notna(row2['Name']):
+                    similarity = fuzz.ratio(str(row1['Account_Name']).lower(), str(row2['Name']).lower())
+                    if similarity >= 90:
+                        output_df.loc[idx1, 'Match'] = row2['Name']
+                        break
+            if pd.notna(output_df.loc[idx1, 'Match']):
+                continue
+        
+        # 5. Check Company (Sheet1) vs Name (Sheet2) with 90% similarity
+        if pd.notna(row1['Company']):
+            for _, row2 in df_sheet2.iterrows():
+                if pd.notna(row2['Name']):
+                    similarity = fuzz.ratio(str(row1['Company']).lower(), str(row2['Name']).lower())
+                    if similarity >= 90:
+                        output_df.loc[idx1, 'Match'] = row2['Name']
+                        break
+    
+    return output_df
+
+def main():
+    # File path (update this with your actual file path)
+    file_path = 'your_excel_file.xlsx'
+    
+    # Match the sheets
+    result_df = match_sheets(file_path)
+    
+    # Write the output to a new Excel file
+    output_file = 'matching_output.xlsx'
+    result_df.to_excel(output_file, index=False)
+    print(f"Matching complete. Output written to {output_file}")
+
+if __name__ == "__main__":
+    main()
