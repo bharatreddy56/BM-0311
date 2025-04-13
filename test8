@@ -2,77 +2,111 @@ import pandas as pd
 from fuzzywuzzy import fuzz
 import os
 
-# File paths - MODIFY THESE TO MATCH YOUR ACTUAL FILES
-sheet1_path = r'C:\path\to\your\sheet1.xlsx'  # Raw string for Windows paths
-sheet2_path = r'C:\path\to\your\sheet2.xlsx'
-output_path = r'C:\path\to\output\matched_output.xlsx'
+# File paths - UPDATE THESE
+sheet1_path = r'C:\your\path\to\sheet1.xlsx'
+sheet2_path = r'C:\your\path\to\sheet2.xlsx'
+output_path = r'C:\your\output\path\matched_output.xlsx'
 
-# Verify paths exist
-if not all(os.path.exists(p) for p in [sheet1_path, sheet2_path]):
-    raise FileNotFoundError("Check your file paths - one or more files don't exist")
+def validate_columns(df, required_cols, sheet_name):
+    """Validate required columns exist in DataFrame"""
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns in {sheet_name}: {', '.join(missing)}")
 
-# Read both Excel files
-sheet1 = pd.read_excel(sheet1_path)
-sheet2 = pd.read_excel(sheet2_path)
+# Read and validate sheets
+try:
+    sheet1 = pd.read_excel(sheet1_path)
+    sheet2 = pd.read_excel(sheet2_path)
+    
+    # Validate Sheet1 columns
+    validate_columns(sheet1, 
+                   ['Id', 'Company', 'Email', 'DomainEmail', 
+                    'Account_Name', 'Account_Hosp_Id_r', 'Account_Mco__Id_r'], 
+                   'Sheet1')
+    
+    # Validate Sheet2 columns
+    validate_columns(sheet2, 
+                   ['Id', 'Name', 'Website', 'Website_2', 
+                    'Account_Hosp_Id', 'Account_Mco__Id'], 
+                   'Sheet2')
 
-# Convert relevant columns to string type and clean data
-for df in [sheet1, sheet2]:
-    df['Account_Hosp_Id_r'] = df['Account_Hosp_Id_r'].astype(str)
-    df['Account_Mco__Id_r'] = df['Account_Mco__Id_r'].astype(str)
-    df['DomainEmail'] = df['DomainEmail'].str.lower().str.strip()
+except Exception as e:
+    print(f"Error reading files: {str(e)}")
+    exit()
 
-sheet2['Account_Hosp_Id'] = sheet2['Account_Hosp_Id'].astype(str)
-sheet2['Account_Mco__Id'] = sheet2['Account_Mco__Id'].astype(str)
-sheet2['Website'] = sheet2['Website'].str.lower().str.strip()
-sheet2['Name'] = sheet2['Name'].str.lower().str.strip()
+# Convert columns to string type safely
+def safe_convert(df, col, default=''):
+    return df[col].astype(str).fillna(default) if col in df.columns else pd.Series(default)
+
+# Process Sheet1
+sheet1['Account_Hosp_Id_r'] = safe_convert(sheet1, 'Account_Hosp_Id_r')
+sheet1['Account_Mco__Id_r'] = safe_convert(sheet1, 'Account_Mco__Id_r')
+sheet1['DomainEmail'] = safe_convert(sheet1, 'DomainEmail').str.lower().str.strip()
+
+# Process Sheet2
+sheet2['Account_Hosp_Id'] = safe_convert(sheet2, 'Account_Hosp_Id')
+sheet2['Account_Mco__Id'] = safe_convert(sheet2, 'Account_Mco__Id')
+sheet2['Website'] = safe_convert(sheet2, 'Website').str.lower().str.strip()
+sheet2['Name'] = safe_convert(sheet2, 'Name').str.lower().str.strip()
 
 # Initialize Match column
 sheet1['Match'] = None
 
 def get_best_match(row, sheet2, column1, column2, threshold=90):
-    """Helper function for fuzzy matching"""
+    """Fuzzy matching with error handling"""
     matches = []
-    for _, s2_row in sheet2.iterrows():
-        if pd.isna(s2_row[column1]) or pd.isna(row[column2]):
-            continue
-        if fuzz.ratio(str(s2_row[column1]).lower(), str(row[column2]).lower()) >= threshold:
-            matches.append((s2_row['Id'], f"name:{s2_row['Name']}"))
-    return matches[0][0] if matches else None
+    try:
+        for _, s2_row in sheet2.iterrows():
+            if pd.isna(s2_row[column1]) or pd.isna(row[column2]):
+                continue
+            if fuzz.ratio(str(s2_row[column1]).lower(), str(row[column2]).lower()) >= threshold:
+                matches.append((s2_row['Id'], f"name:{s2_row['Name']}"))
+        return matches[0][0] if matches else None
+    except Exception as e:
+        print(f"Error in matching: {str(e)}")
+        return None
 
-# Matching logic
-for idx, row in sheet1.iterrows():
-    # Check Account_Hosp_Id first
-    hosp_matches = sheet2[sheet2['Account_Hosp_Id'] == row['Account_Hosp_Id_r']]
-    if not hosp_matches.empty:
-        sheet1.at[idx, 'Match'] = hosp_matches.iloc[0]['Id']
-        continue
-        
-    # Check Account_Mco__Id
-    mco_matches = sheet2[sheet2['Account_Mco__Id'] == row['Account_Mco__Id_r']]
-    if not mco_matches.empty:
-        sheet1.at[idx, 'Match'] = mco_matches.iloc[0]['Id']
-        continue
-        
-    # Check Website vs DomainEmail
-    website_matches = sheet2[sheet2['Website'] == row['DomainEmail']]
-    if not website_matches.empty:
-        sheet1.at[idx, 'Match'] = website_matches.iloc[0]['Id']
-        continue
-        
-    # Fuzzy match Name vs Account_Name
-    name_match = get_best_match(row, sheet2, 'Name', 'Account_Name')
-    if name_match:
-        sheet1.at[idx, 'Match'] = name_match
-        continue
-        
-    # Fuzzy match Name vs Company
-    company_match = get_best_match(row, sheet2, 'Name', 'Company')
-    if company_match:
-        sheet1.at[idx, 'Match'] = company_match
+# Main matching logic
+try:
+    for idx, row in sheet1.iterrows():
+        # Check Account_Hosp_Id first
+        if not pd.isna(row['Account_Hosp_Id_r']):
+            hosp_matches = sheet2[sheet2['Account_Hosp_Id'] == row['Account_Hosp_Id_r']]
+            if not hosp_matches.empty:
+                sheet1.at[idx, 'Match'] = hosp_matches.iloc[0]['Id']
+                continue
+                
+        # Check Account_Mco__Id
+        if not pd.isna(row['Account_Mco__Id_r']):
+            mco_matches = sheet2[sheet2['Account_Mco__Id'] == row['Account_Mco__Id_r']]
+            if not mco_matches.empty:
+                sheet1.at[idx, 'Match'] = mco_matches.iloc[0]['Id']
+                continue
+                
+        # Check Website vs DomainEmail
+        if not pd.isna(row['DomainEmail']):
+            website_matches = sheet2[sheet2['Website'] == row['DomainEmail']]
+            if not website_matches.empty:
+                sheet1.at[idx, 'Match'] = website_matches.iloc[0]['Id']
+                continue
+                
+        # Fuzzy match Name vs Account_Name
+        if 'Account_Name' in sheet1.columns:
+            name_match = get_best_match(row, sheet2, 'Name', 'Account_Name')
+            if name_match:
+                sheet1.at[idx, 'Match'] = name_match
+                continue
+                
+        # Fuzzy match Name vs Company
+        company_match = get_best_match(row, sheet2, 'Name', 'Company')
+        if company_match:
+            sheet1.at[idx, 'Match'] = company_match
 
-# Create output directory if it doesn't exist
-os.makedirs(os.path.dirname(output_path), exist_ok=True)
+except Exception as e:
+    print(f"Error during matching process: {str(e)}")
 
 # Save output
+os.makedirs(os.path.dirname(output_path), exist_ok=True)
 sheet1.to_excel(output_path, index=False)
-print(f"Match completed! Output saved to: {output_path}")
+print(f"Processing complete. Output saved to: {output_path}")
+
