@@ -71,4 +71,23 @@ def fuzzy_match(sheet1_path, sheet2_path, output_path):
 
         output_rows.append({
             'Id': sheet1_row.get('Id', ''),
-            'Company': shee
+            'Company': sheet1_row.get('Company', ''),
+            'Email': sheet1_row.get('Email', ''),
+            'DomainEmail': sheet1_row.get('DomainEmail', ''),
+            'Account_Name': sheet1_row.get('Account_Name', ''),
+            'Account_Hosp_Id_r': sheet1_row.get('Account_Hosp_Id_r', ''),
+            'Account_Mco__Id_r': sheet1_row.get('Account_Mco__Id_r', ''),
+            'Match': match_value
+        })
+
+    # Save to Excel
+    output_df = pd.DataFrame(output_rows)
+    output_df.to_excel(output_path, index=False)
+
+# === UPDATE THESE PATHS TO YOUR FILE LOCATIONS ===
+sheet1_path = r'C:\Users\YourUsername\Documents\sheet1.xlsx'
+sheet2_path = r'C:\Users\YourUsername\Documents\sheet2.xlsx'
+output_path = r'C:\Users\YourUsername\Documents\output.xlsx'
+
+fuzzy_match(sheet1_path, sheet2_path, output_path)
+
