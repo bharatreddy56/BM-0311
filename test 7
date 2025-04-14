@@ -1,52 +1,88 @@
 import pandas as pd
 from fuzzywuzzy import fuzz
+from tqdm import tqdm  # For progress tracking
 
 # Load both Excel files
 sheet1 = pd.read_excel('sheet1.xlsx')
 sheet2 = pd.read_excel('sheet2.xlsx')
 
-def fuzzy_match(str1, str2):
-    return fuzz.ratio(str(str1).lower(), str(str2).lower()) >= 90
+def safe_str_compare(val1, val2):
+    """Handle None/nan values and string conversion safely"""
+    if pd.isna(val1) or pd.isna(val2):
+        return False
+    return str(val1).lower().strip() == str(val2).lower().strip()
 
-# Initialize Match column
-sheet1['Match'] = None
+def fuzzy_match(val1, val2):
+    """Safe fuzzy matching with null checks"""
+    if pd.isna(val1) or pd.isna(val2):
+        return False
+    return fuzz.ratio(str(val1).lower(), str(val2).lower()) >= 90
 
-# 4. Match Account_Hosp_Id
-hosp_matches = pd.merge(sheet1, sheet2, 
-                        left_on='Account_Hosp_Id_r', 
-                        right_on='Account_Hosp_Id',
-                        how='inner')
-sheet1.loc[hosp_matches.index, 'Match'] = hosp_matches['Account_Hosp_Id']
+# Initialize Match column with empty strings
+sheet1['Match'] = ''
 
-# 5. Match Account_Mco__Id for unmatched rows
-remaining = sheet1[sheet1['Match'].isna()]
-mco_matches = pd.merge(remaining, sheet2,
-                      left_on='Account_Mco__Id_r',
-                      right_on='Account_Mco__Id',
-                      how='inner')
-sheet1.loc[mco_matches.index, 'Match'] = mco_matches['Account_Mco__Id']
+# 4. Match Account_Hosp_Id (exact match)
+hosp_mask = sheet1['Account_Hosp_Id_r'].notna()
+hosp_matches = pd.merge(
+    sheet1[hosp_mask],
+    sheet2,
+    left_on='Account_Hosp_Id_r',
+    right_on='Account_Hosp_Id',
+    how='inner'
+)
+sheet1.loc[hosp_matches.index, 'Match'] = hosp_matches['Account_Hosp_Id'].astype(str)
 
-# 6. Fuzzy match Website/DomainEmail
-remaining = sheet1[sheet1['Match'].isna()]
-for idx, row in remaining.iterrows():
-    matches = sheet2[sheet2.apply(lambda x: fuzzy_match(x['Website'], row['DomainEmail']) or 
-                                 fuzzy_match(x['Website_2'], row['DomainEmail']), axis=1)]
+# 5. Match Account_Mco__Id (exact match for remaining)
+remaining_mask = (sheet1['Match'] == '') & sheet1['Account_Mco__Id_r'].notna()
+mco_matches = pd.merge(
+    sheet1[remaining_mask],
+    sheet2,
+    left_on='Account_Mco__Id_r',
+    right_on='Account_Mco__Id',
+    how='inner'
+)
+sheet1.loc[mco_matches.index, 'Match'] = mco_matches['Account_Mco__Id'].astype(str)
+
+# 6. Fuzzy match Website/DomainEmail (with progress bar)
+remaining_mask = sheet1['Match'] == ''
+print("Processing website/domain matches...")
+for idx in tqdm(sheet1[remaining_mask].index):
+    row = sheet1.loc[idx]
+    if pd.isna(row['DomainEmail']):
+        continue
+        
+    # Check both Website and Website_2
+    matches = sheet2[
+        sheet2.apply(lambda x: fuzzy_match(x['Website'], row['DomainEmail']) or 
+                    fuzzy_match(x['Website_2'], row['DomainEmail']), axis=1)
+    ]
     if not matches.empty:
         sheet1.at[idx, 'Match'] = matches.iloc[0]['Website']
 
 # 7. Fuzzy match Name/Account_Name
-remaining = sheet1[sheet1['Match'].isna()]
-for idx, row in remaining.iterrows():
+remaining_mask = sheet1['Match'] == ''
+print("Processing name/account_name matches...")
+for idx in tqdm(sheet1[remaining_mask].index):
+    row = sheet1.loc[idx]
+    if pd.isna(row['Account_Name']):
+        continue
+        
     matches = sheet2[sheet2.apply(lambda x: fuzzy_match(x['Name'], row['Account_Name']), axis=1)]
     if not matches.empty:
         sheet1.at[idx, 'Match'] = matches.iloc[0]['Name']
 
 # 8. Fuzzy match Name/Company
-remaining = sheet1[sheet1['Match'].isna()]
-for idx, row in remaining.iterrows():
+remaining_mask = sheet1['Match'] == ''
+print("Processing name/company matches...")
+for idx in tqdm(sheet1[remaining_mask].index):
+    row = sheet1.loc[idx]
+    if pd.isna(row['Company']):
+        continue
+        
     matches = sheet2[sheet2.apply(lambda x: fuzzy_match(x['Name'], row['Company']), axis=1)]
     if not matches.empty:
         sheet1.at[idx, 'Match'] = matches.iloc[0]['Name']
 
 # Save results
 sheet1.to_excel('matched_output.xlsx', index=False)
+print("Matching complete! Results saved to matched_output.xlsx")
