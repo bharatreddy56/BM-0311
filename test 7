@@ -4,26 +4,60 @@ from rapidfuzz import process, fuzz
 from concurrent.futures import ProcessPoolExecutor
 import os
 
-# ========== ADD THIS SECTION ========== #
-# File paths configuration
+# ========== FILE PATHS CONFIGURATION ========== #
 INPUT_DIR = r'C:\your\input\directory'  # Update this path
 OUTPUT_DIR = r'C:\your\output\directory'  # Update this path
 
 sheet1_path = os.path.join(INPUT_DIR, 'sheet1.xlsx')
 sheet2_path = os.path.join(INPUT_DIR, 'sheet2.xlsx')
 output_path = os.path.join(OUTPUT_DIR, 'matched_output.xlsx')
-# ======================================= #
+# ============================================== #
 
 def fuzzy_match_wrapper(args):
     return process.extractOne(args[0], args[1], scorer=fuzz.WRatio, score_cutoff=90)
 
 def optimize_matching(sheet1, sheet2):
-    # ... [rest of the optimize_matching function code] ...
+    # Convert to categorical for memory optimization
+    sheet1 = sheet1.astype({col: 'category' for col in sheet1.select_dtypes('object').columns})
+    sheet2 = sheet2.astype({col: 'category' for col in sheet2.select_dtypes('object').columns})
+
+    # Create lookup dictionaries for exact matches
+    hosp_lookup = sheet2.set_index('Account_Hosp_Id')['Account_Hosp_Id'].to_dict()
+    mco_lookup = sheet2.set_index('Account_Mco__Id')['Account_Mco__Id'].to_dict()
+    website_lookup = sheet2.set_index('Website')['Website'].to_dict()
+    
+    # Precompute fuzzy match candidates
+    sheet2_names = sheet2['Name'].unique().tolist()
+    
+    # Vectorized exact matching
+    sheet1['Match'] = np.nan
+    mask = sheet1['Account_Hosp_Id_r'].isin(hosp_lookup)
+    sheet1.loc[mask, 'Match'] = sheet1.loc[mask, 'Account_Hosp_Id_r'].map(hosp_lookup)
+    
+    mask = sheet1['Match'].isna() & sheet1['Account_Mco__Id_r'].isin(mco_lookup)
+    sheet1.loc[mask, 'Match'] = sheet1.loc[mask, 'Account_Mco__Id_r'].map(mco_lookup)
+    
+    mask = sheet1['Match'].isna() & sheet1['DomainEmail'].isin(website_lookup)
+    sheet1.loc[mask, 'Match'] = sheet1.loc[mask, 'DomainEmail'].map(website_lookup)
+    
+    # Parallel fuzzy matching for remaining records
+    remaining = sheet1[sheet1['Match'].isna()]
+    if not remaining.empty:
+        with ProcessPoolExecutor() as executor:
+            matches = list(executor.map(fuzzy_match_wrapper, 
+                                     zip(remaining['Account_Name'], 
+                                         [sheet2_names]*len(remaining))))
+        
+        sheet1.loc[remaining.index, 'Match'] = [m[0] if m else np.nan for m in matches]
+    
+    return sheet1
 
 def validate_columns(df, required_cols, sheet_name):
-    # ... [your existing validation code] ...
+    """Validate required columns exist in DataFrame"""
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns in {sheet_name}: {', '.join(missing)}")
 
-# ========== ADD THIS SECTION ========== #
 def main():
     # Create output directory if needed
     os.makedirs(OUTPUT_DIR, exist_ok=True)
