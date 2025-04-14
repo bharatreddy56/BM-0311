@@ -1,104 +1,74 @@
 import pandas as pd
-from fuzzywuzzy import fuzz
-import os
+from thefuzz import fuzz
+from tqdm import tqdm
 
-# File paths - UPDATE THESE
-sheet1_path = r'C:\your\path\to\sheet1.xlsx'
-sheet2_path = r'C:\your\path\to\sheet2.xlsx'
-output_path = r'C:\your\output\path\matched_output.xlsx'
+def fuzzy_match(sheet1_path, sheet2_path, output_path):
+    # Read Excel files
+    df1 = pd.read_excel(sheet1_path, dtype=str)
+    df2 = pd.read_excel(sheet2_path, dtype=str)
 
-def validate_columns(df, required_cols, sheet_name):
-    """Validate required columns exist in DataFrame"""
-    missing = [col for col in required_cols if col not in df.columns]
-    if missing:
-        raise ValueError(f"Missing columns in {sheet_name}: {', '.join(missing)}")
+    # Fill NaN with empty string for safe comparison
+    df1 = df1.fillna('')
+    df2 = df2.fillna('')
 
-# Read and validate sheets
-try:
-    sheet1 = pd.read_excel(sheet1_path)
-    sheet2 = pd.read_excel(sheet2_path)
-    
-    # Validate Sheet1 columns
-    validate_columns(sheet1, 
-                   ['Id', 'Company', 'Email', 'DomainEmail', 
-                    'Account_Name', 'Account_Hosp_Id_r', 'Account_Mco__Id_r'], 
-                   'Sheet1')
-    
-    # Validate Sheet2 columns
-    validate_columns(sheet2, 
-                   ['Id', 'Name', 'Website', 'Website_2', 
-                    'Account_Hosp_Id', 'Account_Mco__Id'], 
-                   'Sheet2')
+    # Prepare lookup sets for fuzzy matching
+    domain_emails = df1['DomainEmail'].unique()
+    account_names = df1['Account_Name'].unique()
+    companies = df1['Company'].unique()
 
-except Exception as e:
-    print(f"Error reading files: {str(e)}")
-    exit()
+    # Prepare for fast exact matching
+    hosp_id_set = set(df1['Account_Hosp_Id_r'])
+    mco_id_set = set(df1['Account_Mco__Id_r'])
 
-# Convert columns to string and clean data
-def safe_convert(df, col):
-    return df[col].astype(str).str.lower().str.strip()
+    # Prepare output DataFrame
+    output_rows = []
 
-sheet1['Account_Hosp_Id_r'] = safe_convert(sheet1, 'Account_Hosp_Id_r')
-sheet1['Account_Mco__Id_r'] = safe_convert(sheet1, 'Account_Mco__Id_r')
-sheet1['DomainEmail'] = safe_convert(sheet1, 'DomainEmail')
-sheet1['Account_Name'] = safe_convert(sheet1, 'Account_Name')
-sheet1['Company'] = safe_convert(sheet1, 'Company')
+    for idx, row in tqdm(df2.iterrows(), total=len(df2)):
+        match_value = ''
 
-sheet2['Account_Hosp_Id'] = safe_convert(sheet2, 'Account_Hosp_Id')
-sheet2['Account_Mco__Id'] = safe_convert(sheet2, 'Account_Mco__Id')
-sheet2['Website'] = safe_convert(sheet2, 'Website')
-sheet2['Name'] = safe_convert(sheet2, 'Name')
+        # 1. Account_Hosp_Id match
+        if row['Account_Hosp_Id'] in hosp_id_set and row['Account_Hosp_Id']:
+            match_value = row['Account_Hosp_Id']
 
-def get_best_match(row, sheet2, match_type, threshold=90):
-    """Fuzzy matching with match type specification"""
-    best_match = None
-    best_score = 0
-    
-    for _, s2_row in sheet2.iterrows():
-        if match_type == 'website':
-            score = fuzz.ratio(row['DomainEmail'], s2_row['Website'])
-        elif match_type == 'account_name':
-            score = fuzz.ratio(row['Account_Name'], s2_row['Name'])
-        elif match_type == 'company':
-            score = fuzz.ratio(row['Company'], s2_row['Name'])
-        
-        if score >= threshold and score > best_score:
-            best_score = score
-            best_match = s2_row[match_type.split('_')[0]]  # Returns website/name based on match type
-    
-    return best_match
+        # 2. Account_Mco__Id match
+        elif row['Account_Mco__Id'] in mco_id_set and row['Account_Mco__Id']:
+            match_value = row['Account_Mco__Id']
 
-# Main matching logic
-for idx, row in sheet1.iterrows():
-    match_value = None
-    
-    # 4. Check Account_Hosp_Id first
-    if row['Account_Hosp_Id_r'] != 'nan':
-        hosp_matches = sheet2[sheet2['Account_Hosp_Id'] == row['Account_Hosp_Id_r']]
-        if not hosp_matches.empty:
-            match_value = hosp_matches.iloc[0]['Account_Hosp_Id']
-    
-    # 5. Check Account_Mco__Id if no previous match
-    if not match_value and row['Account_Mco__Id_r'] != 'nan':
-        mco_matches = sheet2[sheet2['Account_Mco__Id'] == row['Account_Mco__Id_r']]
-        if not mco_matches.empty:
-            match_value = mco_matches.iloc[0]['Account_Mco__Id']
-    
-    # 6. Check Website vs DomainEmail with fuzzy matching
-    if not match_value and row['DomainEmail'] != 'nan':
-        match_value = get_best_match(row, sheet2, 'website')
-    
-    # 7. Check Name vs Account_Name with fuzzy matching
-    if not match_value and row['Account_Name'] != 'nan':
-        match_value = get_best_match(row, sheet2, 'account_name')
-    
-    # 8. Check Name vs Company with fuzzy matching
-    if not match_value and row['Company'] != 'nan':
-        match_value = get_best_match(row, sheet2, 'company')
-    
-    sheet1.at[idx, 'Match'] = match_value
+        # 3. Website vs DomainEmail (fuzzy)
+        elif row['Website']:
+            for domain in domain_emails:
+                if fuzz.token_sort_ratio(row['Website'], domain) >= 90:
+                    match_value = row['Website']
+                    break
 
-# Save output
-os.makedirs(os.path.dirname(output_path), exist_ok=True)
-sheet1.to_excel(output_path, index=False)
-print(f"Processing complete. Output saved to: {output_path}")
+        # 4. Name vs Account_Name (fuzzy)
+        if not match_value and row['Name']:
+            for name in account_names:
+                if fuzz.token_sort_ratio(row['Name'], name) >= 90:
+                    match_value = row['Name']
+                    break
+
+        # 5. Name vs Company (fuzzy)
+        if not match_value and row['Name']:
+            for company in companies:
+                if fuzz.token_sort_ratio(row['Name'], company) >= 90:
+                    match_value = row['Name']
+                    break
+
+        # Find corresponding values from sheet1 for output
+        # (You can adjust this logic if you want to pull more info from sheet1)
+        sheet1_row = df1[
+            (df1['Account_Hosp_Id_r'] == row['Account_Hosp_Id']) |
+            (df1['Account_Mco__Id_r'] == row['Account_Mco__Id']) |
+            (df1['DomainEmail'] == row['Website']) |
+            (df1['Account_Name'] == row['Name']) |
+            (df1['Company'] == row['Name'])
+        ]
+        if not sheet1_row.empty:
+            sheet1_row = sheet1_row.iloc[0]
+        else:
+            sheet1_row = pd.Series({col: '' for col in ['Id', 'Company', 'Email', 'DomainEmail', 'Account_Name', 'Account_Hosp_Id_r', 'Account_Mco__Id_r']})
+
+        output_rows.append({
+            'Id': sheet1_row.get('Id', ''),
+            'Company': shee
