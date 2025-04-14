@@ -5,22 +5,25 @@ from concurrent.futures import ThreadPoolExecutor
 from tqdm.auto import tqdm
 import os
 
-def fuzzy_match_sheet1_main(sheet1_path, sheet2_path, output_path, chunk_size=50000):
+def fuzzy_match_large(sheet1_path, sheet2_path, output_path, chunk_size=50000):
     # Configure pandas for better memory usage
     pd.set_option('mode.chained_assignment', None)
     
-    # Create optimized readers
-    sheet1_reader = pd.read_excel(sheet1_path, dtype=str, chunksize=chunk_size)
-    sheet2_reader = pd.read_excel(sheet2_path, dtype=str, chunksize=chunk_size)
+    # Create optimized readers using ExcelFile
+    print("Loading Sheet1...")
+    sheet1_chunks = pd.read_excel(sheet1_path, dtype=str, engine='openpyxl')
+    sheet2_chunks = pd.read_excel(sheet2_path, dtype=str, engine='openpyxl')
 
-    # Preprocess Sheet2 (secondary dataset)
+    # Preprocess Sheet2 data in memory-efficient way
+    print("Preprocessing Sheet2 data...")
     all_websites = set()
     all_names = set()
     hosp_id_set = set()
     mco_id_set = set()
 
-    print("Preprocessing Sheet2 (secondary) data...")
-    for chunk in sheet2_reader:
+    # Process Sheet2 in chunks manually
+    for i in tqdm(range(0, len(sheet2_chunks), chunk_size), desc="Processing Sheet2"):
+        chunk = sheet2_chunks.iloc[i:i + chunk_size]
         chunk = chunk.replace({np.nan: None, 'nan': None, '': None})
         hosp_id_set.update(chunk['Account_Hosp_Id'].dropna().unique())
         mco_id_set.update(chunk['Account_Mco__Id'].dropna().unique())
@@ -32,70 +35,64 @@ def fuzzy_match_sheet1_main(sheet1_path, sheet2_path, output_path, chunk_size=50
 
     def process_chunk(chunk):
         results = []
-        for _, sheet1_row in chunk.iterrows():
+        for _, row in chunk.iterrows():
             match_value = ''
-            match_type = ''
             
             # 1. Account_Hosp_Id_r match
-            if sheet1_row['Account_Hosp_Id_r'] in hosp_id_set:
-                match_value = sheet1_row['Account_Hosp_Id_r']
-                match_type = 'Account_Hosp_Id'
+            if row['Account_Hosp_Id_r'] in hosp_id_set:
+                match_value = row['Account_Hosp_Id_r']
             
             # 2. Account_Mco__Id_r match
-            elif sheet1_row['Account_Mco__Id_r'] in mco_id_set:
-                match_value = sheet1_row['Account_Mco__Id_r']
-                match_type = 'Account_Mco__Id'
+            elif row['Account_Mco__Id_r'] in mco_id_set:
+                match_value = row['Account_Mco__Id_r']
             
             # 3. DomainEmail vs Website (fuzzy)
-            elif sheet1_row['DomainEmail']:
+            elif row['DomainEmail']:
                 match = process.extractOne(
-                    sheet1_row['DomainEmail'],
+                    row['DomainEmail'],
                     websites,
                     scorer=fuzz.token_sort_ratio,
                     score_cutoff=90
                 )
                 if match:
                     match_value = match[0]
-                    match_type = 'DomainEmail-Website'
             
             # 4. Account_Name vs Name (fuzzy)
-            elif sheet1_row['Account_Name']:
+            elif row['Account_Name']:
                 match = process.extractOne(
-                    sheet1_row['Account_Name'],
+                    row['Account_Name'],
                     names,
                     scorer=fuzz.token_sort_ratio,
                     score_cutoff=90
                 )
                 if match:
                     match_value = match[0]
-                    match_type = 'Account_Name-Name'
             
             # 5. Company vs Name (fuzzy)
-            elif sheet1_row['Company']:
+            elif row['Company']:
                 match = process.extractOne(
-                    sheet1_row['Company'],
+                    row['Company'],
                     names,
                     scorer=fuzz.token_sort_ratio,
                     score_cutoff=90
                 )
                 if match:
                     match_value = match[0]
-                    match_type = 'Company-Name'
 
             results.append({
-                **sheet1_row,
-                'Match': match_value,
-                'Match_Type': match_type  # Optional: Track which match type succeeded
+                **row.to_dict(),
+                'Match': match_value
             })
         
         return pd.DataFrame(results)
 
-    # Process Sheet1 (main) in chunks with parallel execution
-    print("Processing Sheet1 (main) data...")
+    # Process Sheet1 in chunks manually
+    print("Processing Sheet1 data...")
     chunk_results = []
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as executor:
         futures = []
-        for chunk in sheet1_reader:
+        for i in tqdm(range(0, len(sheet1_chunks), chunk_size), desc="Creating chunks"):
+            chunk = sheet1_chunks.iloc[i:i + chunk_size]
             chunk = chunk.replace({np.nan: None, 'nan': None, '': None})
             futures.append(executor.submit(process_chunk, chunk))
         
@@ -106,7 +103,6 @@ def fuzzy_match_sheet1_main(sheet1_path, sheet2_path, output_path, chunk_size=50
     print("Saving results...")
     final_df = pd.concat(chunk_results, ignore_index=True)
     
-    # Optimized Excel writing
     writer = pd.ExcelWriter(
         output_path,
         engine='xlsxwriter',
@@ -116,10 +112,11 @@ def fuzzy_match_sheet1_main(sheet1_path, sheet2_path, output_path, chunk_size=50
     writer.close()
 
 # =======================================================================
-# UPDATE THESE PATHS TO YOUR ACTUAL FILE LOCATIONS
+# UPDATE THESE PATHS
 # =======================================================================
-sheet1_path = r'C:\path\to\main_data_sheet1.xlsx'  # Your primary dataset
-sheet2_path = r'C:\path\to\secondary_data_sheet2.xlsx'  # Your lookup dataset
+sheet1_path = r'C:\path\to\main_data_sheet1.xlsx'
+sheet2_path = r'C:\path\to\secondary_data_sheet2.xlsx'
 output_path = r'C:\path\to\matched_results.xlsx'
 
-fuzzy_match_sheet1_main(sheet1_path, sheet2_path, output_path)
+fuzzy_match_large(sheet1_path, sheet2_path, output_path)
+
