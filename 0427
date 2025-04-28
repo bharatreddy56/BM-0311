@@ -1,0 +1,19 @@
+import pandas as pd
+
+# Read your Excel file (replace 'input.xlsx' with your filename)
+df = pd.read_excel('input.xlsx')
+
+# Group by Domain and AccountId to count occurrences
+count_df = df.groupby(['Domain', 'AccountId']).size().reset_index(name='Count')
+
+# For each Domain, find the max count
+max_count_df = count_df.groupby('Domain')['Count'].max().reset_index(name='Highest Count')
+
+# Merge to get AccountId(s) with the highest count per Domain
+merged_df = pd.merge(max_count_df, count_df, left_on=['Domain', 'Highest Count'], right_on=['Domain', 'Count'])
+
+# Aggregate AccountId(s) with the highest count per Domain into a comma-separated string
+result_df = merged_df.groupby(['Domain', 'Highest Count'])['AccountId'].apply(lambda x: ', '.join(x)).reset_index()
+
+# Save to Excel
+result_df.to_excel('output_result.xlsx', index=False)
