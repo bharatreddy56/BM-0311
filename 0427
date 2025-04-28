@@ -1,19 +1,25 @@
 import pandas as pd
 
-# Read your Excel file (replace 'input.xlsx' with your filename)
-df = pd.read_excel('input.xlsx')
+# Read the Excel file from C drive
+input_path = r'C:\input.xlsx'         # Update this path if your file has a different name or location
+output_path = r'C:\output_result.xlsx'
 
-# Group by Domain and AccountId to count occurrences
+# Read the data
+df = pd.read_excel(input_path)
+
+# Count occurrences of each AccountId within each Domain
 count_df = df.groupby(['Domain', 'AccountId']).size().reset_index(name='Count')
 
-# For each Domain, find the max count
-max_count_df = count_df.groupby('Domain')['Count'].max().reset_index(name='Highest Count')
+# Find the highest count per Domain
+max_count_df = count_df.groupby('Domain')['Count'].max().reset_index(name='Highest Count on AccountId')
 
 # Merge to get AccountId(s) with the highest count per Domain
-merged_df = pd.merge(max_count_df, count_df, left_on=['Domain', 'Highest Count'], right_on=['Domain', 'Count'])
+merged_df = pd.merge(max_count_df, count_df, left_on=['Domain', 'Highest Count on AccountId'], right_on=['Domain', 'Count'])
 
 # Aggregate AccountId(s) with the highest count per Domain into a comma-separated string
-result_df = merged_df.groupby(['Domain', 'Highest Count'])['AccountId'].apply(lambda x: ', '.join(x)).reset_index()
+result_df = merged_df.groupby(['Domain', 'Highest Count on AccountId'])['AccountId'].apply(lambda x: ', '.join(x)).reset_index()
 
 # Save to Excel
-result_df.to_excel('output_result.xlsx', index=False)
+result_df.to_excel(output_path, index=False)
+
+print(f"Output saved to {output_path}")
