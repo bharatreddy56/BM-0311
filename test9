@@ -1,37 +1,28 @@
 import pandas as pd
 
-# File paths
+# File paths (update as needed)
 input_path = r'C:\data\input.xlsx'
 output_path = r'C:\data\output.xlsx'
 
-# Read the Excel file (assuming data is in 'Sheet1')
+# Read the Excel file
 df = pd.read_excel(input_path, sheet_name='Sheet1')
 
-# Columns to merge/fill (E to L, i.e., columns 4 to 11, zero-indexed)
-cols_to_merge = df.columns[4:12]
+# Columns to fill (E to L: 4th to 11th columns, zero-indexed)
+cols_to_fill = df.columns[4:12]
+email_col = 'Email'  # Update if your column name is different
 
-# Group by Email and merge rows
-def merge_group(group):
-    # For each column, fill missing values with available data within the group
-    merged_row = group.iloc[0].copy()
-    for col in cols_to_merge:
-        # If all values are missing, leave as is
+# Fill missing values within each email group
+def fill_missing(group):
+    for col in cols_to_fill:
+        # Only fill NA if all non-NA values are the same
         non_nulls = group[col].dropna().unique()
-        if len(non_nulls) == 0:
-            continue
-        elif len(non_nulls) == 1:
-            merged_row[col] = non_nulls[0]
-        else:
-            # If conflicting (different) data, join as string separated by ' / ' (or keep as is)
-            merged_row[col] = ' / '.join(map(str, non_nulls))
-    return merged_row
+        if len(non_nulls) == 1:
+            group[col] = group[col].fillna(non_nulls[0])
+    return group
 
-# Apply merging function
-output_df = df.groupby('Email', as_index=False).apply(merge_group)
-
-# Reset index if needed
-output_df.reset_index(drop=True, inplace=True)
+# Apply the function to each group of duplicate emails
+df_filled = df.groupby(email_col, group_keys=False).apply(fill_missing)
 
 # Save to Excel
-output_df.to_excel(output_path, index=False)
+df_filled.to_excel(output_path, index=False)
 print(f"Output saved to {output_path}")
