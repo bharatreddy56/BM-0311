@@ -4,18 +4,18 @@ import numpy as np
 # Path to your Excel file
 file_path = r'C:\your_folder\your_file.xlsx'  # Change this to your actual file path
 
-# List of required CreatedBy names
-required_names = ['Test1', 'Test2']  # Add more names as needed
+# List of CreatedBy names to check
+target_names = ['Test1', 'Test2']  # Add more names as needed
 
 # Read the Excel file (assuming data is in 'Sheet1')
 df = pd.read_excel(file_path, sheet_name='Sheet1')
 
-# Function to check if all required_names are present in a group
-def check_all_present(series):
-    return all(name in series.values for name in required_names)
+# Function to check if at least one target_name is present in a group
+def check_any_present(series):
+    return any(name in series.values for name in target_names)
 
-# Identify groups to Keep (where all required_names are present)
-keep_groups = df.groupby('Group')['CreatedBy'].transform(check_all_present)
+# Identify groups to Keep (where at least one target_name is present)
+keep_groups = df.groupby('Group')['CreatedBy'].transform(check_any_present)
 
 # Add the 'Decision' column
 df['Decision'] = np.where(keep_groups, 'Keep', 'Exclude')
