@@ -1,0 +1,18 @@
+import pandas as pd
+import numpy as np
+
+# Load your Excel file
+df = pd.read_excel(r'C:\your_file.xlsx')
+
+# Trim whitespace and handle case sensitivity
+df['CreatedBy'] = df['CreatedBy'].str.strip().str.lower()
+target_names = ['test1', 'test2']  # Ensure lowercase and trimmed
+
+# Improved group check using pandas' vectorized operations
+keep_groups = df.groupby('Group')['CreatedBy'].transform(lambda x: x.isin(target_names).any())
+
+# Assign decision
+df['Decision'] = np.where(keep_groups, 'Keep', 'Exclude')
+
+# Save result
+df.to_excel(r'C:\output.xlsx', index=False)
