@@ -1,0 +1,47 @@
+import pandas as pd
+from datetime import datetime
+
+# File paths
+file_a = r'C:\A.xlsx'
+file_b = r'C:\B.xlsx'
+output_file = f'C:\\B_with_account_info_{datetime.now().strftime("%Y%m%d")}.xlsx'
+
+# Read the Excel files
+df_a = pd.read_excel(file_a)
+df_b = pd.read_excel(file_b)
+
+# Group by 'ExtractingDomainFromEmail' in A and find most frequent AccountId and corresponding Account.Name
+# Count AccountId occurrences per domain
+agg = (
+    df_a.groupby(['ExtractingDomainFromEmail', 'AccountId', 'Accont.Name'])
+    .size()
+    .reset_index(name='count')
+)
+
+# For each domain, get the AccountId with the highest count
+agg_sorted = agg.sort_values(['ExtractingDomainFromEmail', 'count'], ascending=[True, False])
+agg_top = agg_sorted.drop_duplicates('ExtractingDomainFromEmail', keep='first')
+
+# Rename columns for merging
+agg_top = agg_top.rename(columns={
+    'AccountId': 'RevisedAccountId',
+    'Accont.Name': 'RevisedAccountName'
+})[['ExtractingDomainFromEmail', 'RevisedAccountId', 'RevisedAccountName']]
+
+# Merge with B on ExtractingDomainFromEmail
+df_merged = pd.merge(
+    df_b,
+    agg_top,
+    on='ExtractingDomainFromEmail',
+    how='left'
+)
+
+# Reorder columns as requested
+output_cols = [
+    'Id', 'Email', 'ExtractingDomainFromEmail', 'RevisedAccountId', 'RevisedAccountName'
+]
+df_merged = df_merged[output_cols]
+
+# Write to Excel
+df_merged.to_excel(output_file, index=False)
+print(f"Output written to {output_file}")
